@@ -1,0 +1,9 @@
+python-telegram-bot
+google-generativeai
+groq
+notion-client
+qdrant-client
+yt-dlp
+requests
+schedule
+dotenv

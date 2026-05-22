@@ -1,0 +1,4 @@
+.env
+.venv*
+second_brain_data*
+__pycache__/
