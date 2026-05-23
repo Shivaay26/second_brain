@@ -34,12 +34,11 @@ async def run_journal_prompt(context: ContextTypes.DEFAULT_TYPE):
 
 async def reflect_command(update, context):
     """Jarvis Reflect: Holds up a mirror across your last 7 days, 4 weeks, and past year."""
-    query = " ".join(context.args).lower().strip()
+    query = " ".join(context.args).strip()
     await update.message.reply_text("🤖 Jarvis is analyzing your 1-year trajectory...")
     
     try:
         summaries = []
-        active_goals = []
         
         def read_page_body(page_id: str) -> str:
             blocks = notion.blocks.children.list(block_id=page_id)
@@ -49,33 +48,14 @@ async def reflect_command(update, context):
                 if b["type"] == "paragraph" and b["paragraph"]["rich_text"]
             )
 
-        # 1. FETCH ACTIVE MACRO GOALS
-        try:
-            goals_raw = await asyncio.to_thread(
-                notion.databases.query,
-                database_id=TASKS_DB_ID,
-                filter={
-                    "and": [
-                        {"property": "Type", "select": {"equals": "Goal"}},
-                        {"property": "Status", "status": {"equals": "In Progress"}}
-                    ]
-                }
-            )
-            for page in goals_raw.get("results", []):
-                title_list = page["properties"]["Name"]["title"]
-                if title_list:
-                    active_goals.append(f"- {title_list[0]['text']['content']}")
-        except Exception:
-            active_goals.append("- No explicitly linked macro goals found in database.")
-
-        # 2. FETCH THE 3-LAYER TIMELINE (No keywords, just pure structural data)
+        # 1. FETCH THE 3-LAYER TIMELINE (No keywords, just pure structural data)
         
         # Layer 1: Last 7 Days
         daily_raw = await asyncio.to_thread(
             notion.databases.query,
             database_id=DAILY_SUMMARY_DB_ID,
             sorts=[{"property": "Date", "direction": "descending"}],
-            page_size=7
+            page_size=7s
         )
         for page in daily_raw.get("results", []):
             date = page["properties"]["Date"]["date"]
@@ -107,7 +87,6 @@ async def reflect_command(update, context):
             summaries.append(f"[MONTHLY — {date['start'] if date else 'Unknown'}]\n{body}")
 
         context_str = "\n\n---\n\n".join(summaries)
-        goals_str = "\n".join(active_goals)
         
         history_str = ""
         if conversation_history:
@@ -115,15 +94,16 @@ async def reflect_command(update, context):
             for turn in conversation_history[-MAX_HISTORY:]:
                 history_str += f"You: {turn['question']}\nAssistant: {turn['answer']}\n---\n"
 
-        # 3. THE JARVIS EXECUTIVE COACH PROMPT
+        # 2. THE JARVIS EXECUTIVE COACH PROMPT
         system_instruction = """
 You are Jarvis, an elite, brutally honest executive performance coach and practical philosopher.
-Your job is to look at the user's active macro goals and cross-reference them with their chronological daily, weekly, and monthly identity reflections.
+The user will give you a specific query, goal, or intention. Your job is to cross-reference their query with their chronological daily, weekly, and monthly identity reflections.
 
 You have total visibility over three distinct tiers: the last 7 days of raw execution, the last 4 weeks of behavioral patterns, and the last 12 months of macro identity shifts. 
 
 Do not parrot back what they did. Hold up a mirror to their actual life. Look for cognitive dissonance:
-- Are they claiming a goal is a priority, but their weekly 'Dominant Themes' or 'What Rolled Over' shows total neglect?
+- Does their historical behavior actually align with what they are asking about?
+- Look closely at their 'Dominant Themes' and 'What Rolled Over' sections.
 - Where are they lying to themselves? Where have they genuinely evolved over the last year?
 
 Write sharply in the second person ("You..."). Be direct, objective, and deeply analytical. Zero corporate fluff, zero generic motivational garbage. Speak as an omnipresent intelligence that remembers their journey perfectly.
@@ -131,14 +111,11 @@ Write sharply in the second person ("You..."). Be direct, objective, and deeply 
         
         prompt = f"""
 {history_str}
-USER'S ACTIVE MACRO GOALS:
-{goals_str}
-
 COMPRESSED 1-YEAR HISTORICAL TIMELINE:
 {context_str}
 
-CRITICAL REFLECTION QUESTION:
-{query or 'Analyze my recent trajectory against my goals and give me an unfiltered audit.'}
+CRITICAL REFLECTION QUESTION / TARGET GOAL:
+{query or 'Analyze my recent trajectory and give me an unfiltered audit of my current direction.'}
 """
         
         response = await asyncio.to_thread(
@@ -157,7 +134,6 @@ CRITICAL REFLECTION QUESTION:
 
     except Exception as e:
         await update.message.reply_text(f"⛔ Jarvis Error: {e}")
-
 
 async def done_command(update, context):
     """Marks a matching task as Done in Notion."""
