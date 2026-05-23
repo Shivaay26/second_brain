@@ -154,16 +154,19 @@ def insert_vector_batch(memories: List[Dict]):
         return
         
     try:
-        # Extract just the raw text strings for Gemini
-        contents = [item["content"] for item in memories]
+        # Wrap each text in a types.Content object so Gemini knows to generate SEPARATE vectors!
+        contents = [
+            types.Content(parts=[types.Part.from_text(text=item["content"])]) 
+            for item in memories
+        ]
         
-        # 1. Generate the batched embedding vectors (ONE Network Dependency)
+        # 1. Generate the batched embedding vectors (ONE Network Dependency!)
         embedding_response = ai_client.models.embed_content(
             model=embedding_model,
             contents=contents,
             config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT", 
                 output_dimensionality=768 # Force 768 to match your existing local Qdrant db
+                # Note: task_type is deprecated in gemini-embedding-2, so it is removed.
             )
         )
         

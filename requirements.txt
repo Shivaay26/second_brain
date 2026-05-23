@@ -27,7 +27,7 @@ httpx==0.28.1
 hyperframe==6.1.0
 idna==3.15
 notion-client==3.1.0
-numpy==2.4.6
+numpy
 pillow==12.2.0
 portalocker==3.2.0
 proto-plus==1.28.0

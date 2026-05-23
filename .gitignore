@@ -2,3 +2,5 @@
 .venv*
 second_brain_data*
 __pycache__/
+venv*
+cookies.txt

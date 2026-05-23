@@ -95,79 +95,81 @@ async def compile_batch():
     # --- TRIAGE SHIPPING ---
     batch_content = json.dumps(processed_rows, indent=2)
     
+    # --- TRIAGE SHIPPING (INDIVIDUAL PROCESSING) ---
     system_prompt = """
     You are the structural triage router for a personal Second Brain system.
-    You take a compiled JSON batch of inbox data items and route them accurately.
+    Analyze this SINGLE inbox item and route it accurately.
     1. Tasks -> 'notion_tasks'
     2. Deep observations, logs -> 'notion_logs'
     3. High-value learning resources -> 'notion_vault' (Always route videos/educational links here)
     4. Rapid links, fleeting thoughts -> 'qdrant_memories' (Exclusive to Vector DB)
     
-    CRITICAL DATE RULES:
+    CRITICAL DATE & URL RULES:
     - The user's local timezone is IST (UTC+5:30).
-    - When generating 'due_date' strings with specific times, strictly use ISO 8601 format with the local offset appended, matching this exact style: YYYY-MM-DDTHH:mm:ss+05:30
-    CRITICAL: You must preserve original URLs. If an incoming item contains a URL, pass it exactly into the 'url' or 'source_url' fields of your schema. Do not drop them.
+    - When generating 'due_date' strings, use format: YYYY-MM-DDTHH:mm:ss+05:30
+    - Preserve original URLs exactly. Do not drop them.
     """
     
-    print(f"📦 Shipping batch of {len(processed_rows)} elements to Gemini...")
+    print(f"📦 Triaging {len(processed_rows)} elements individually to guarantee isolation...")
     
-    try:
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=f"Deconstruct this batch:\n\n{batch_content}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=TriageBlueprint,
+    vector_batch_payload = []
+    processed_ids = []
+
+    # Process each item ONE-BY-ONE through the LLM
+    for row in processed_rows:
+        try:
+            response = await asyncio.to_thread(
+                ai_client.models.generate_content,
+                model=gemini_model,
+                contents=f"Deconstruct this item:\n\n{row['content']}",
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    response_schema=TriageBlueprint,
+                )
             )
-        )
-        
-        blueprint = json.loads(response.text)
-        
-        # We will compile ALL vector items here and write them down in ONE single trip
-        vector_batch_payload = []
+            
+            blueprint = json.loads(response.text)
+            
+            # Route to Notion & stage for unified Vector Batch
+            for task in blueprint.get("notion_tasks", []):
+                insert_task(task["task_name"], task.get("due_date"), task.get("status", "Not started"))
+                vector_batch_payload.append({
+                    "content": f"Task: {task['task_name']} | Due: {task.get('due_date')}",
+                    "category": "Task", "source_url": None
+                })
 
-        # Route to Notion & stage for unified Vector Batch
-        for task in blueprint.get("notion_tasks", []):
-            insert_task(task["task_name"], task.get("due_date"), task.get("status", "Not started"))
-            vector_batch_payload.append({
-                "content": f"Task: {task['task_name']} | Due: {task.get('due_date')}",
-                "category": "Task",
-                "source_url": None
-            })
+            for log in blueprint.get("notion_logs", []):
+                insert_daily_log(log["title"], log["category"], log["content"])
+                vector_batch_payload.append({
+                    "content": f"Log: {log['title']} | {log['content']}",
+                    "category": log["category"], "source_url": None
+                })
 
-        for log in blueprint.get("notion_logs", []):
-            insert_daily_log(log["title"], log["category"], log["content"])
-            vector_batch_payload.append({
-                "content": f"Log: {log['title']} | {log['content']}",
-                "category": log["category"],
-                "source_url": None
-            })
+            for asset in blueprint.get("notion_vault", []):
+                insert_content_vault(asset["title"], asset["url"], asset["summary"])
+                vector_batch_payload.append({
+                    "content": f"Vault: {asset['title']} | {asset['summary']}",
+                    "category": "Vault", "source_url": asset["url"]
+                })
 
-        for asset in blueprint.get("notion_vault", []):
-            insert_content_vault(asset["title"], asset["url"], asset["summary"])
-            vector_batch_payload.append({
-                "content": f"Vault: {asset['title']} | {asset['summary']}",
-                "category": "Vault",
-                "source_url": asset["url"]
-            })
+            for memory in blueprint.get("qdrant_memories", []):
+                vector_batch_payload.append({
+                    "content": memory["content"],
+                    "category": memory["category"], "source_url": memory.get("source_url")
+                })
+                
+            processed_ids.append(row["id"])
+            await asyncio.sleep(1) # Tiny safety buffer between API calls
+            
+        except Exception as e:
+            print(f"⛔ Triage Error on row {row['id']}: {e}")
 
-        for memory in blueprint.get("qdrant_memories", []):
-            vector_batch_payload.append({
-                "content": memory["content"],
-                "category": memory["category"],
-                "source_url": memory.get("source_url")
-            })
+    # Commit ALL collected items to Qdrant at once!
+    if vector_batch_payload:
+        insert_vector_batch(vector_batch_payload)
 
-        # Commit everything to Qdrant at once!
-        if vector_batch_payload:
-            insert_vector_batch(vector_batch_payload)
-
-        # Mark database queue items as processed
-        processed_ids = [row['id'] for row in processed_rows]
+    # Mark database queue items as processed
+    if processed_ids:
         update_queue_status(processed_ids, "completed")
-        print(f"✅ Successfully processed batch. IDs: {processed_ids}")
-        
-    except Exception as e:
-        print(f"⛔ Compilation Error: {e}")
+        print(f"✅ Successfully processed queue. IDs: {processed_ids}")
