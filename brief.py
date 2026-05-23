@@ -8,8 +8,6 @@ from google.genai import types
 
 load_dotenv()
 
-6455532575
-
 NOTION_TOKEN     = os.getenv("notion_token")
 GEMINI_API_KEY   = os.getenv("gemini_api_key")
 TASKS_DB_ID      = os.getenv("tasks_db_id")
@@ -19,7 +17,7 @@ DAILY_LOG_DB_ID  = os.getenv("daily_log_db_id")
 
 notion    = Client(auth=NOTION_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
-gemini_model = "gemini-2.5-flash-preview-05-20"
+gemini_model = "gemini-3.1-flash-lite"
 
 # ── STATE FLAG ────────────────────────────────────────────────────────────────
 waiting_for_journal = False
@@ -37,16 +35,16 @@ Answer all of these in one message, however you want:
 6. What do you want tomorrow to look like?
 """
 
-
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def get_ist_now() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
-
-def fetch_pending_tasks() -> list:
+# 🔥 FIX: Converted to async and threaded
+async def fetch_pending_tasks() -> list:
     try:
-        results = notion.databases.query(
+        results = await asyncio.to_thread(
+            notion.databases.query,
             database_id=TASKS_DB_ID,
             filter={
                 "or": [
@@ -71,13 +69,14 @@ def fetch_pending_tasks() -> list:
         print(f"⚠️ Failed to fetch tasks for brief: {e}")
         return []
 
-
-def fetch_yesterday_summary() -> str:
+# 🔥 FIX: Converted to async and threaded
+async def fetch_yesterday_summary() -> str:
     try:
         now_ist    = get_ist_now()
         yesterday  = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        results = notion.databases.query(
+        results = await asyncio.to_thread(
+            notion.databases.query,
             database_id=DAILY_SUMMARY_DB_ID,
             filter={"property": "Date", "date": {"equals": yesterday}}
         )
@@ -86,7 +85,8 @@ def fetch_yesterday_summary() -> str:
             return "No summary found for yesterday."
 
         page_id = pages[0]["id"]
-        blocks  = notion.blocks.children.list(block_id=page_id)
+        blocks  = await asyncio.to_thread(notion.blocks.children.list, block_id=page_id)
+        
         return " ".join(
             b["paragraph"]["rich_text"][0]["text"]["content"]
             for b in blocks.get("results", [])
@@ -103,19 +103,12 @@ async def send_morning_brief(bot, chat_id: int, context=None):
     """Generates and sends the morning brief to the user."""
     print("📋 Generating morning brief...")
     try:
-        tasks          = fetch_pending_tasks()
-        yesterday_summary = fetch_yesterday_summary()
+        # 🔥 FIX: Awaiting the newly async helpers
+        tasks          = await fetch_pending_tasks()
+        yesterday_summary = await fetch_yesterday_summary()
         today_str      = get_ist_now().strftime("%A, %B %d %Y")
 
-        raw_data = f"""
-TODAY: {today_str}
-
-YESTERDAY'S SUMMARY:
-{yesterday_summary}
-
-PENDING TASKS:
-{chr(10).join(tasks) or '  None'}
-"""
+        raw_data = f"TODAY: {today_str}\n\nYESTERDAY'S SUMMARY:\n{yesterday_summary}\n\nPENDING TASKS:\n{chr(10).join(tasks) or '  None'}\n"
 
         system_prompt = """
 You are a sharp personal advisor delivering a morning brief for a Second Brain system.
@@ -172,8 +165,6 @@ async def send_journal_prompt(bot, chat_id: int, context=None):
 
 async def process_journal_entry(text: str) -> str:
     """Takes the user's raw text dump and structures it into a journal entry."""
-    today_str = get_ist_now().strftime("%Y-%m-%d")
-
     system_prompt = """
 You are processing a raw end-of-day journal dump for a personal Second Brain system.
 The user has answered 6 questions in one free-form message.
@@ -217,8 +208,9 @@ async def save_journal_to_notion(entry_text: str):
     title       = f"Journal — {today_str}"
 
     try:
-        # Write to Journal DB
-        notion.pages.create(
+        # 🔥 FIX: Threaded to prevent bot freeze. Removed [:2000] limit so full journal saves.
+        await asyncio.to_thread(
+            notion.pages.create,
             parent={"database_id": JOURNAL_DB_ID},
             properties={
                 "Title": {"title": [{"text": {"content": title}}]},
@@ -228,14 +220,15 @@ async def save_journal_to_notion(entry_text: str):
                 "object": "block",
                 "type": "paragraph",
                 "paragraph": {
-                    "rich_text": [{"type": "text", "text": {"content": entry_text[:2000]}}]
+                    "rich_text": [{"type": "text", "text": {"content": entry_text}}]
                 }
             }]
         )
         print(f"✅ Journal entry saved to Notion for {today_str}")
 
-        # Also write to Daily Log so it feeds into daily summary
-        notion.pages.create(
+        # 🔥 FIX: Threaded. Kept [:2000] here ONLY because Notion properties enforce it.
+        await asyncio.to_thread(
+            notion.pages.create,
             parent={"database_id": DAILY_LOG_DB_ID},
             properties={
                 "Title":    {"title": [{"text": {"content": f"Evening Journal — {today_str}"}}]},

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from storage import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID, notion
 
 # 🔥 FIX 1: Import the whole module to preserve state and prevent NameErrors
-import brief_journal 
+import brief
 
 gemini_model = 'gemini-3.1-flash-lite'
 embedding_model = "gemini-embedding-2"
@@ -27,22 +27,20 @@ conversation_history = []
 MAX_HISTORY = 15
 
 async def run_morning_brief(context: ContextTypes.DEFAULT_TYPE):
-    await brief_journal.send_morning_brief(context.bot, chat_id=MY_CHAT_ID)
+    await brief.send_morning_brief(context.bot, chat_id=MY_CHAT_ID)
 
 async def run_journal_prompt(context: ContextTypes.DEFAULT_TYPE):
-    await brief_journal.send_journal_prompt(context.bot, chat_id=MY_CHAT_ID)
+    await brief.send_journal_prompt(context.bot, chat_id=MY_CHAT_ID)
 
 async def reflect_command(update, context):
-    """Fetches daily/weekly/monthly summaries and reflects on them."""
+    """Jarvis Reflect: Holds up a mirror across your last 7 days, 4 weeks, and past year."""
     query = " ".join(context.args).lower().strip()
-    await update.message.reply_text("🔍 Pulling summaries...")
+    await update.message.reply_text("🤖 Jarvis is analyzing your 1-year trajectory...")
     
     try:
         summaries = []
-        fetch_daily   = not query or any(w in query for w in ["day", "today", "yesterday", "daily"])
-        fetch_weekly  = not query or any(w in query for w in ["week", "weekly"])
-        fetch_monthly = not query or any(w in query for w in ["month", "monthly"])
-
+        active_goals = []
+        
         def read_page_body(page_id: str) -> str:
             blocks = notion.blocks.children.list(block_id=page_id)
             return " ".join(
@@ -51,66 +49,98 @@ async def reflect_command(update, context):
                 if b["type"] == "paragraph" and b["paragraph"]["rich_text"]
             )
 
-        # 🔥 FIX 2: Wrapping Notion Database Queries in thread to prevent bot freeze
-        if fetch_daily:
-            daily_raw = await asyncio.to_thread(
+        # 1. FETCH ACTIVE MACRO GOALS
+        try:
+            goals_raw = await asyncio.to_thread(
                 notion.databases.query,
-                database_id=DAILY_SUMMARY_DB_ID,
-                sorts=[{"property": "Date", "direction": "descending"}],
-                page_size=7
+                database_id=TASKS_DB_ID,
+                filter={
+                    "and": [
+                        {"property": "Type", "select": {"equals": "Goal"}},
+                        {"property": "Status", "status": {"equals": "In Progress"}}
+                    ]
+                }
             )
-            for page in daily_raw.get("results", []):
-                date = page["properties"]["Date"]["date"]
-                body = await asyncio.to_thread(read_page_body, page["id"])
-                summaries.append(f"[DAILY — {date['start'] if date else 'Unknown'}]\n{body}")
+            for page in goals_raw.get("results", []):
+                title_list = page["properties"]["Name"]["title"]
+                if title_list:
+                    active_goals.append(f"- {title_list[0]['text']['content']}")
+        except Exception:
+            active_goals.append("- No explicitly linked macro goals found in database.")
 
-        if fetch_weekly:
-            weekly_raw = await asyncio.to_thread(
-                notion.databases.query,
-                database_id=WEEKLY_SUMMARY_DB_ID,
-                sorts=[{"property": "Date", "direction": "descending"}],
-                page_size=4
-            )
-            for page in weekly_raw.get("results", []):
-                date = page["properties"]["Date"]["date"]
-                body = await asyncio.to_thread(read_page_body, page["id"])
-                summaries.append(f"[WEEKLY — {date['start'] if date else 'Unknown'}]\n{body}")
+        # 2. FETCH THE 3-LAYER TIMELINE (No keywords, just pure structural data)
+        
+        # Layer 1: Last 7 Days
+        daily_raw = await asyncio.to_thread(
+            notion.databases.query,
+            database_id=DAILY_SUMMARY_DB_ID,
+            sorts=[{"property": "Date", "direction": "descending"}],
+            page_size=7
+        )
+        for page in daily_raw.get("results", []):
+            date = page["properties"]["Date"]["date"]
+            body = await asyncio.to_thread(read_page_body, page["id"])
+            summaries.append(f"[DAILY — {date['start'] if date else 'Unknown'}]\n{body}")
 
-        if fetch_monthly:
-            monthly_raw = await asyncio.to_thread(
-                notion.databases.query,
-                database_id=MONTHLY_SUMMARY_DB_ID,
-                sorts=[{"property": "Date", "direction": "descending"}],
-                page_size=3
-            )
-            for page in monthly_raw.get("results", []):
-                date = page["properties"]["Date"]["date"]
-                body = await asyncio.to_thread(read_page_body, page["id"])
-                summaries.append(f"[MONTHLY — {date['start'] if date else 'Unknown'}]\n{body}")
+        # Layer 2: Last 4 Weeks
+        weekly_raw = await asyncio.to_thread(
+            notion.databases.query,
+            database_id=WEEKLY_SUMMARY_DB_ID,
+            sorts=[{"property": "Date", "direction": "descending"}],
+            page_size=4
+        )
+        for page in weekly_raw.get("results", []):
+            date = page["properties"]["Date"]["date"]
+            body = await asyncio.to_thread(read_page_body, page["id"])
+            summaries.append(f"[WEEKLY — {date['start'] if date else 'Unknown'}]\n{body}")
 
-        if not summaries:
-            await update.message.reply_text("No summaries found yet. Let the system run for a few days first.")
-            return
+        # Layer 3: Last 12 Months
+        monthly_raw = await asyncio.to_thread(
+            notion.databases.query,
+            database_id=MONTHLY_SUMMARY_DB_ID,
+            sorts=[{"property": "Date", "direction": "descending"}],
+            page_size=12
+        )
+        for page in monthly_raw.get("results", []):
+            date = page["properties"]["Date"]["date"]
+            body = await asyncio.to_thread(read_page_body, page["id"])
+            summaries.append(f"[MONTHLY — {date['start'] if date else 'Unknown'}]\n{body}")
 
         context_str = "\n\n---\n\n".join(summaries)
+        goals_str = "\n".join(active_goals)
+        
         history_str = ""
         if conversation_history:
             history_str = "=== CONVERSATION HISTORY ===\n"
             for turn in conversation_history[-MAX_HISTORY:]:
                 history_str += f"You: {turn['question']}\nAssistant: {turn['answer']}\n---\n"
 
+        # 3. THE JARVIS EXECUTIVE COACH PROMPT
         system_instruction = """
-You are a personal Second Brain reflection engine.
-You have access to the user's daily, weekly, and monthly summaries and conversation history.
-Use conversation history to understand follow-up questions and maintain context across the session.
-Answer retrospective questions honestly and sharply.
-Identify patterns, growth, and stuck points when relevant.
-Be direct — not motivational. Write in second person ("You...").
-Never say "based on the context" — just reflect naturally.
+You are Jarvis, an elite, brutally honest executive performance coach and practical philosopher.
+Your job is to look at the user's active macro goals and cross-reference them with their chronological daily, weekly, and monthly identity reflections.
+
+You have total visibility over three distinct tiers: the last 7 days of raw execution, the last 4 weeks of behavioral patterns, and the last 12 months of macro identity shifts. 
+
+Do not parrot back what they did. Hold up a mirror to their actual life. Look for cognitive dissonance:
+- Are they claiming a goal is a priority, but their weekly 'Dominant Themes' or 'What Rolled Over' shows total neglect?
+- Where are they lying to themselves? Where have they genuinely evolved over the last year?
+
+Write sharply in the second person ("You..."). Be direct, objective, and deeply analytical. Zero corporate fluff, zero generic motivational garbage. Speak as an omnipresent intelligence that remembers their journey perfectly.
 """
-        prompt = f"{history_str}\nSummaries:\n{context_str}\n\nQuestion: {query or 'Give me a general reflection on my recent activity.'}"
         
-        # 🔥 FIX 2: Gemini Generation wrapped in thread
+        prompt = f"""
+{history_str}
+USER'S ACTIVE MACRO GOALS:
+{goals_str}
+
+COMPRESSED 1-YEAR HISTORICAL TIMELINE:
+{context_str}
+
+CRITICAL REFLECTION QUESTION:
+{query or 'Analyze my recent trajectory against my goals and give me an unfiltered audit.'}
+"""
+        
         response = await asyncio.to_thread(
             ai_client.models.generate_content,
             model=gemini_model,
@@ -126,7 +156,7 @@ Never say "based on the context" — just reflect naturally.
         await update.message.reply_text(answer)
 
     except Exception as e:
-        await update.message.reply_text(f"⛔ Error: {e}")
+        await update.message.reply_text(f"⛔ Jarvis Error: {e}")
 
 
 async def done_command(update, context):
@@ -305,8 +335,8 @@ async def handle_incoming(update, context):
     if not message: return
 
     # 🔥 FIX 1: Corrected namespace reference for waiting_for_journal
-    if brief_journal.waiting_for_journal and message.text:
-        await brief_journal.handle_journal_response(update, context.bot)
+    if brief.waiting_for_journal and message.text:
+        await brief.handle_journal_response(update, context.bot)
         return
     
     msg_type, content = None, None
@@ -379,13 +409,20 @@ def main():
         job_kwargs={"misfire_grace_time": 300}
     )
 
-    app.job_queue.run_daily(compile_daily_summary, time=time(18, 30, tzinfo=timezone.utc))
-    app.job_queue.run_daily(compile_weekly_summary, time=time(18, 25, tzinfo=timezone.utc), days=(6,))
-    app.job_queue.run_daily(compile_monthly_summary, time=time(18, 20, tzinfo=timezone.utc))
+    # 10:00 PM IST daily
+    app.job_queue.run_daily(callback=run_journal_prompt, time=time(16, 30, tzinfo=timezone.utc))
     
-    # Brief & Journal triggers
-    app.job_queue.run_daily(run_morning_brief, time(2, 30, tzinfo=timezone.utc))
-    app.job_queue.run_daily(run_journal_prompt, time(16, 30, tzinfo=timezone.utc))
+    # 11:50 PM IST daily
+    app.job_queue.run_daily(callback=compile_monthly_summary, time=time(18, 20, tzinfo=timezone.utc))
+    
+    # 11:55 PM IST on SUNDAYS (Changed from 6 to 0 for v20+)
+    app.job_queue.run_daily(callback=compile_weekly_summary, time=time(18, 25, tzinfo=timezone.utc), days=(0,))
+    
+    # Midnight IST daily
+    app.job_queue.run_daily(callback=compile_daily_summary, time=time(18, 30, tzinfo=timezone.utc))
+    
+    # 8:00 AM IST daily
+    app.job_queue.run_daily(callback=run_morning_brief, time=time(2, 30, tzinfo=timezone.utc))
 
     print("🚀 Master Node Online. Interactive Mode & Auto-Compiler Active.")
     app.run_polling()
