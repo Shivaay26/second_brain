@@ -15,6 +15,7 @@ load_dotenv()
 
 gemini_model = 'gemini-3.1-flash-lite'  # Define the Gemini model to use globally
 embedding_model = "gemini-embedding-2"  # Define the embedding model globally
+JOURNAL_DB_ID = os.getenv("journal_db_id")
 
 # Tokens
 TOKEN = os.getenv("bot_token")
@@ -24,6 +25,9 @@ NOTION_TOKEN = os.getenv("notion_token")
 # Database IDs
 TASKS_DB_ID = os.getenv("tasks_db_id")
 DAILY_LOG_DB_ID = os.getenv("daily_log_db_id")
+DAILY_SUMMARY_DB_ID  = os.getenv("daily_summary_db_id")
+WEEKLY_SUMMARY_DB_ID = os.getenv("weekly_summary_db_id")
+MONTHLY_SUMMARY_DB_ID = os.getenv("monthly_summary_db_id")
 CONTENT_VAULT_DB_ID = os.getenv("content_vault_db_id")
 
 # 2. Setup Directory Structure
