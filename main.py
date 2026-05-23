@@ -1,4 +1,6 @@
 import os
+import asyncio
+from datetime import time, timezone
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from google.genai import types
 
@@ -6,8 +8,12 @@ from google.genai import types
 from storage import TOKEN, FOLDERS, ai_client, qdrant_client, COLLECTION_NAME, save_to_queue
 from ai_engine import compile_batch
 
-gemini_model = 'gemini-3.1-flash-lite'  # Define the Gemini model to use globally
-embedding_model = "gemini-embedding-2"  # Define the embedding model globally
+from daily_summary import compile_daily_summary
+from weekly_summary import compile_weekly_summary
+from monthly_summary import compile_monthly_summary
+
+gemini_model = 'gemini-3.1-flash-lite'
+embedding_model = "gemini-embedding-2"
 
 async def ask_command(update, context):
     """Interactive Vector Search Interface with URL retrieval."""
@@ -35,7 +41,6 @@ async def ask_command(update, context):
             await update.message.reply_text("No matching contexts found.")
             return
 
-        # FIXED: Pull both content AND source_url into the LLM's context window
         retrieved_contexts = []
         for p in search_result:
             item_text = f"[{p.payload.get('timestamp')}] ({p.payload.get('category')}) {p.payload.get('content')}"
@@ -45,7 +50,6 @@ async def ask_command(update, context):
             
         context_str = "\n---\n".join(retrieved_contexts)
 
-        # FIXED: Strict system instruction forcing Gemini to print out the link
         system_instruction = (
             "You are a personal Second Brain. Answer using ONLY the provided memories. "
             "CRITICAL: If a 'Link to Watch' is present in the matching memory, you MUST explicitly "
@@ -97,12 +101,14 @@ async def handle_incoming(update, context):
         save_to_queue(msg_type, content)
         await message.reply_text(f"📥 Queued: [{msg_type.upper()}]")
 
+
 async def run_compiler_job(context: ContextTypes.DEFAULT_TYPE):
     """Background task that runs the AI triage loop"""
     try:
-        await compile_batch() # <-- Simply add 'await' here
+        await compile_batch()
     except Exception as e:
         print(f"Background Compiler failed: {e}")
+
 
 def main():
     if not TOKEN:
@@ -110,17 +116,30 @@ def main():
         
     app = Application.builder().token(TOKEN).build()
 
-    # Commands & Routing
     app.add_handler(CommandHandler("ask", ask_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_incoming))
 
-    # --- THE MAGIC AUTOMATION ---
-    # This runs `run_compiler_job` every 300 seconds (5 mins) in the background
     app.job_queue.run_repeating(
-        run_compiler_job, 
-        interval=90, 
+        run_compiler_job,
+        interval=90,
         first=10,
         job_kwargs={"misfire_grace_time": 300}
+    )
+
+    app.job_queue.run_daily(
+        compile_daily_summary,
+        time=time(18, 30, tzinfo=timezone.utc),
+    )
+
+    app.job_queue.run_daily(
+        compile_weekly_summary,
+        time=time(18, 25, tzinfo=timezone.utc),
+        days=(6,)
+    )
+
+    app.job_queue.run_daily(
+        compile_monthly_summary,
+        time=time(18, 20, tzinfo=timezone.utc),
     )
 
     print("🚀 Master Node Online. Interactive Mode & Auto-Compiler Active.")
