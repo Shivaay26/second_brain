@@ -85,7 +85,7 @@ def fetch_pending_queue():
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT id, type, content, timestamp FROM incoming_queue WHERE status = 'pending' LIMIT 15")
+        cursor.execute("SELECT id, type, content, timestamp FROM incoming_queue WHERE status = 'pending'")
         return [dict(row) for row in cursor.fetchall()]
 
 def update_queue_status(processed_ids, status="completed"):
