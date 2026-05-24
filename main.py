@@ -55,7 +55,7 @@ async def reflect_command(update, context):
             notion.databases.query,
             database_id=DAILY_SUMMARY_DB_ID,
             sorts=[{"property": "Date", "direction": "descending"}],
-            page_size=7s
+            page_size=7
         )
         for page in daily_raw.get("results", []):
             date = page["properties"]["Date"]["date"]
@@ -221,7 +221,7 @@ async def ask_command(update, context):
             qdrant_client.query_points,
             collection_name=COLLECTION_NAME,
             query=embedding_response.embeddings[0].values,
-            limit=3
+            limit=100
         )
         
         retrieved_contexts = []
