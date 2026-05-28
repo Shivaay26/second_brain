@@ -20,7 +20,6 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 from config import gemini_model
 
 # ── STATE FLAG ────────────────────────────────────────────────────────────────
-waiting_for_journal = False
 
 JOURNAL_QUESTIONS = """
 📓 *Evening Journal — End of Day*
@@ -155,8 +154,9 @@ List any tasks due today. If none, say so plainly.
 
 async def send_journal_prompt(bot, chat_id: int, context=None):
     """Sends journal questions at 10 PM and sets the waiting flag."""
-    global waiting_for_journal
-    waiting_for_journal = True
+    if context and hasattr(context, "application"):
+        context.application.chat_data[chat_id] = context.application.chat_data.get(chat_id, {})
+        context.application.chat_data[chat_id]['waiting_for_journal'] = True
     print("📓 Sending journal prompt...")
     await bot.send_message(chat_id=chat_id, text=JOURNAL_QUESTIONS, parse_mode="Markdown")
 
@@ -242,10 +242,12 @@ async def save_journal_to_notion(entry_text: str):
         print(f"⚠️ Failed to save journal to Notion: {e}")
 
 
-async def handle_journal_response(update, bot):
+async def handle_journal_response(update, bot, context=None):
     """Called from handle_incoming when waiting_for_journal is True."""
-    global waiting_for_journal
-    waiting_for_journal = False
+    if context and hasattr(context, "application"):
+        chat_id = update.message.chat_id
+        if chat_id in context.application.chat_data:
+            context.application.chat_data[chat_id]['waiting_for_journal'] = False
 
     await bot.send_message(
         chat_id=update.message.chat_id,

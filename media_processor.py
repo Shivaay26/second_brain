@@ -12,6 +12,12 @@ from datetime import timedelta
 from storage import ai_client
 from config import gemini_model, FOLDERS
 
+def check_capacity_error(e: Exception, context: str):
+    error_msg = str(e)
+    if any(code in error_msg for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]):
+        print(f"🚨 Server capacity threshold reached in {context}! Raising bubble-up exception to save data.")
+        raise RuntimeError(f"Transient Google API Error: {error_msg}. Postponing item.")
+
 async def batch_analyze_local_images(image_paths: List[str]) -> List[str]:
     """Opens a batch of local images, passes them to Gemini Vision, and returns OCR/descriptions."""
     if not image_paths:
@@ -47,14 +53,8 @@ async def batch_analyze_local_images(image_paths: List[str]) -> List[str]:
         return descriptions
         
     except Exception as e:
-        error_msg = str(e)
-        print(f"⛔ Image Batch Processing Error: {error_msg}")
-        
-        # CRITICAL SAFETY GATE: Protect image data from API capacity spikes
-        if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-            print("🚨 Server capacity threshold reached! Raising bubble-up exception to save image data.")
-            raise RuntimeError(f"Transient Google API Error: {error_msg}. Postponing image batch.")
-            
+        check_capacity_error(e, "Image Batch")
+        print(f"⛔ Image Batch Processing Error: {e}")
         return [f"[Failed to analyze image: {e}]"] * len(image_paths)
 
 
@@ -103,14 +103,8 @@ async def process_audio_file_via_gemini(file_path: str) -> str:
         return metadata_header + response.text.strip()
         
     except Exception as e:
-        error_msg = str(e)
-        print(f"⛔ Gemini Error: {error_msg}")
-        
-        # CRITICAL SAFETY GATE: Protect audio transcription from dropping during generation
-        if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-            print("🚨 Server capacity threshold reached! Raising bubble-up exception to save audio data.")
-            raise RuntimeError(f"Transient Google API Error: {error_msg}. Postponing audio item.")
-            
+        check_capacity_error(e, "Audio Processing")
+        print(f"⛔ Gemini Error: {e}")
         return f"[Failed to analyze audio directly: {e}]"
         
     finally:
@@ -174,17 +168,12 @@ async def process_external_video(url: str) -> dict:
         }
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"⚠️ YouTube Direct Error: {error_msg}")
-        
-        if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-            print("🚨 Server capacity threshold reached! Raising bubble-up exception to postpone data.")
-            raise RuntimeError(f"Transient Google API Error: {error_msg}. Postponing item.")
-        
+        check_capacity_error(e, "YouTube Direct")
+        print(f"⚠️ YouTube Direct Error: {e}")
         print("❌ Gemini rejected the URL format natively. Marking as failed.")
         return {
             "title": "Error", 
-            "transcript": f"[Failed: Gemini rejected the video natively. Likely Unlisted, Age-Restricted, or the 8-hour limit reached. Details: {error_msg}]"
+            "transcript": f"[Failed: Gemini rejected the video natively. Likely Unlisted, Age-Restricted, or the 8-hour limit reached. Details: {e}]"
         }
 
 
@@ -281,12 +270,8 @@ async def batch_process_short_media(urls: List[str]) -> List[dict]:
         return final_results
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"⛔ Batch Audio Processing Error: {error_msg}")
-        
-        if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-            raise RuntimeError(f"Transient Google API Error: {error_msg}. Postponing batch.")
-            
+        check_capacity_error(e, "Short Media Batch")
+        print(f"⛔ Batch Audio Processing Error: {e}")
         return [{"title": "Error", "transcript": f"[Batch processing failed: {e}]", "url": u} for u in urls]
 
     finally:

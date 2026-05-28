@@ -33,7 +33,7 @@ async def run_morning_brief(context: ContextTypes.DEFAULT_TYPE):
     await brief.send_morning_brief(context.bot, chat_id=MY_CHAT_ID)
 
 async def run_journal_prompt(context: ContextTypes.DEFAULT_TYPE):
-    await brief.send_journal_prompt(context.bot, chat_id=MY_CHAT_ID)
+    await brief.send_journal_prompt(context.bot, MY_CHAT_ID, context)
 
 async def reflect_command(update, context):
     """Jarvis Reflect: Holds up a mirror across your last 7 days, 4 weeks, and past year."""
@@ -352,9 +352,9 @@ async def handle_incoming(update, context):
     message = update.message
     if not message: return
 
-    # 🔥 FIX 1: Corrected namespace reference for waiting_for_journal
-    if brief.waiting_for_journal and message.text:
-        await brief.handle_journal_response(update, context.bot)
+    chat_data = context.application.chat_data.get(message.chat_id, {})
+    if chat_data.get('waiting_for_journal') and message.text:
+        await brief.handle_journal_response(update, context.bot, context)
         return
     
     msg_type, content = None, None
