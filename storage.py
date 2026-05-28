@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from notion_client import Client
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, PointIdsList
 from typing import Optional, List, Dict
 
 # 1. Load Environment Variables
@@ -191,3 +191,16 @@ def insert_vector_batch(memories: List[Dict]):
         
     except Exception as e:
         print(f"⚠️ Failed to batch insert vector memories due to error: {e}")
+
+def delete_vectors(point_ids: List[str]):
+    """Deletes specific vectors from Qdrant by their point IDs."""
+    if not point_ids:
+        return
+    try:
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=PointIdsList(points=point_ids)
+        )
+        print(f"✅ Successfully deleted {len(point_ids)} vectors from Qdrant.")
+    except Exception as e:
+        print(f"⚠️ Failed to delete vectors {point_ids} from Qdrant: {e}")

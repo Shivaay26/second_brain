@@ -5,7 +5,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from google.genai import types
 
 # Import from our modular system
-from storage import TOKEN, FOLDERS, ai_client, qdrant_client, COLLECTION_NAME, save_to_queue
+from storage import TOKEN, FOLDERS, ai_client, qdrant_client, COLLECTION_NAME, save_to_queue, delete_vectors
 from ai_engine import compile_batch
 
 from daily_summary import compile_daily_summary
@@ -24,6 +24,7 @@ embedding_model = "gemini-embedding-2"
 MY_CHAT_ID = 6455532575
 
 conversation_history = []
+tracked_memories = []
 MAX_HISTORY = 15
 
 async def run_morning_brief(context: ContextTypes.DEFAULT_TYPE):
@@ -225,11 +226,14 @@ async def ask_command(update, context):
         )
         
         retrieved_contexts = []
-        for p in search_response.points:
-            item_text = f"[{p.payload.get('timestamp')}] ({p.payload.get('category')}) {p.payload.get('content')}"
+        start_idx = len(tracked_memories) + 1
+        for i, p in enumerate(search_response.points):
+            idx = start_idx + i
+            item_text = f"[{idx}] [{p.payload.get('timestamp')}] ({p.payload.get('category')}) {p.payload.get('content')}"
             if p.payload.get('source_url'):
                 item_text += f" | Link: {p.payload.get('source_url')}"
             retrieved_contexts.append(item_text)
+            tracked_memories.append({"id": p.id, "text": p.payload.get('content')})
 
         now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
         
@@ -276,6 +280,7 @@ async def ask_command(update, context):
 You are a personal Second Brain assistant with access to semantic memories, live Notion state, and conversation history.
 Use conversation history to understand follow-up questions and maintain context across the session.
 Answer using the full context — memories for deep/historical questions, Notion for current tasks and today's activity.
+When you use information from Semantic Memories, ALWAYS cite the memory index like [1] or [5].
 Be direct and conversational. If a URL is present in memories, include it.
 Never say "based on the context provided" — just answer naturally.
 """
@@ -300,9 +305,44 @@ Never say "based on the context provided" — just answer naturally.
 
 
 async def clear_command(update, context):
-    """Clears the conversation history."""
+    """Clears the conversation history and tracked memories."""
     conversation_history.clear()
-    await update.message.reply_text("🧹 Conversation history cleared.")
+    tracked_memories.clear()
+    await update.message.reply_text("🧹 Conversation history and tracked memories cleared.")
+
+async def delete_command(update, context):
+    """Deletes specific memories from Qdrant."""
+    if not context.args:
+        await update.message.reply_text("Usage: /delete <memory_index>[,<memory_index>...]\nExample: /delete 1, 2, 3")
+        return
+    
+    raw_indices = " ".join(context.args)
+    str_indices = [x.strip() for x in raw_indices.split(",") if x.strip()]
+    
+    indices_to_delete = []
+    for s in str_indices:
+        try:
+            index = int(s)
+            if index < 1 or index > len(tracked_memories):
+                await update.message.reply_text(f"❌ Invalid index: {index}. Valid range is 1 to {len(tracked_memories)}.")
+                return
+            indices_to_delete.append(index)
+        except ValueError:
+            await update.message.reply_text(f"❌ Invalid number format: {s}")
+            return
+            
+    if not indices_to_delete:
+        await update.message.reply_text("❌ No valid indices provided.")
+        return
+        
+    point_ids = [tracked_memories[i - 1]["id"] for i in indices_to_delete]
+    
+    try:
+        # Threaded deletion
+        await asyncio.to_thread(delete_vectors, point_ids)
+        await update.message.reply_text(f"✅ Successfully deleted {len(point_ids)} memories from the database.")
+    except Exception as e:
+        await update.message.reply_text(f"⛔ Error deleting memories: {e}")
 
 
 async def handle_incoming(update, context):
@@ -358,6 +398,7 @@ async def setup_menu_commands(application: Application):
         ("ask", "Ask your Second Brain a question"),
         ("reflect", "Reflect on Daily/Weekly/Monthly summaries"),
         ("done", "Mark a Notion task as completed"),
+        ("delete", "Delete a specific memory by index"),
         ("clear", "Clear chat context history")
     ]
     await application.bot.set_my_commands(commands)
@@ -374,6 +415,7 @@ def main():
     app.add_handler(CommandHandler("ask", ask_command))
     app.add_handler(CommandHandler("reflect", reflect_command))
     app.add_handler(CommandHandler("done", done_command))
+    app.add_handler(CommandHandler("delete", delete_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_incoming))
 
