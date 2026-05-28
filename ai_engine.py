@@ -3,8 +3,7 @@ import asyncio
 import os
 from typing import List, Optional
 from pydantic import BaseModel
-from google.genai import types
-from storage import fetch_pending_queue, update_queue_status
+from services.storage import fetch_pending_queue, update_queue_status
 from services.notion_service import insert_task, insert_daily_log
 from services.qdrant_service import insert_vector_batch
 from services.llm_service import generate_structured_data
@@ -12,7 +11,7 @@ from media_processor import process_audio_file_via_gemini, process_external_vide
 
 from config import (
     image_batch_size, short_media_batch_size, video_audio_batch_size, 
-    gemini_model, embedding_model, yt_domains, short_domains
+    yt_domains, short_domains
 )
 
 class TaskSchema(BaseModel):

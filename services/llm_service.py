@@ -19,6 +19,18 @@ async def generate_text(prompt: str, content: str) -> str:
     )
     return response.text.strip()
 
+async def generate_content(contents, prompt: str = None, config=None):
+    """Generates Gemini content for multimodal or custom-config requests."""
+    if prompt and config is None:
+        config = {"system_instruction": prompt}
+
+    return await asyncio.to_thread(
+        ai_client.models.generate_content,
+        model=gemini_model,
+        contents=contents,
+        config=config,
+    )
+
 async def generate_structured_data(prompt: str, content: str, schema):
     """Generates JSON structured data conforming to a Pydantic schema."""
     response = await asyncio.to_thread(
@@ -33,12 +45,30 @@ async def generate_structured_data(prompt: str, content: str, schema):
     )
     return response.text
 
-def get_embeddings(contents: list):
+async def upload_file(file_path: str):
+    """Uploads a local file to Gemini Files."""
+    return await asyncio.to_thread(ai_client.files.upload, file=file_path)
+
+async def get_file(name: str):
+    """Fetches Gemini File metadata."""
+    return await asyncio.to_thread(ai_client.files.get, name=name)
+
+async def delete_file(name: str):
+    """Deletes a Gemini File."""
+    return await asyncio.to_thread(ai_client.files.delete, name=name)
+
+def get_embeddings(contents: list, task_type: str = None):
     """Generates embeddings for a list of contents in a single network call."""
+    config_kwargs = {"output_dimensionality": VECTOR_SIZE}
+    if task_type:
+        config_kwargs["task_type"] = task_type
+
     return ai_client.models.embed_content(
         model=embedding_model,
         contents=contents,
-        config=types.EmbedContentConfig(
-            output_dimensionality=VECTOR_SIZE # Force to match existing Qdrant db
-        )
+        config=types.EmbedContentConfig(**config_kwargs)
     )
+
+async def get_embeddings_async(contents, task_type: str = None):
+    """Async wrapper around Gemini embeddings."""
+    return await asyncio.to_thread(get_embeddings, contents, task_type)

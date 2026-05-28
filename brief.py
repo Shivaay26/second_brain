@@ -1,10 +1,9 @@
-import os
 import asyncio
 from datetime import datetime, timedelta, timezone
-from dotenv import load_dotenv
-from google.genai import types
-from config import gemini_model
-from services.notion_service import notion, TASKS_DB_ID, DAILY_SUMMARY_DB_ID, JOURNAL_DB_ID, DAILY_LOG_DB_ID
+from services.notion_service import (
+    query_database, create_page, get_page_blocks,
+    TASKS_DB_ID, DAILY_SUMMARY_DB_ID, JOURNAL_DB_ID, DAILY_LOG_DB_ID
+)
 from services.llm_service import generate_text
 
 # ── STATE FLAG ────────────────────────────────────────────────────────────────
@@ -31,9 +30,9 @@ def get_ist_now() -> datetime:
 async def fetch_pending_tasks() -> list:
     try:
         results = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=TASKS_DB_ID,
-            filter={
+            query_database,
+            TASKS_DB_ID,
+            {
                 "or": [
                     {"property": "Status_Update", "status": {"equals": "Not started"}},
                     {"property": "Status_Update", "status": {"equals": "In progress"}},
@@ -63,16 +62,16 @@ async def fetch_yesterday_summary() -> str:
         yesterday  = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
 
         results = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=DAILY_SUMMARY_DB_ID,
-            filter={"property": "Date", "date": {"equals": yesterday}}
+            query_database,
+            DAILY_SUMMARY_DB_ID,
+            {"property": "Date", "date": {"equals": yesterday}}
         )
         pages = results.get("results", [])
         if not pages:
             return "No summary found for yesterday."
 
         page_id = pages[0]["id"]
-        blocks  = await asyncio.to_thread(notion.blocks.children.list, block_id=page_id)
+        blocks  = await asyncio.to_thread(get_page_blocks, page_id)
         
         return " ".join(
             b["paragraph"]["rich_text"][0]["text"]["content"]
@@ -187,13 +186,13 @@ async def save_journal_to_notion(entry_text: str):
     try:
         # 🔥 FIX: Threaded to prevent bot freeze. Removed [:2000] limit so full journal saves.
         await asyncio.to_thread(
-            notion.pages.create,
-            parent={"database_id": JOURNAL_DB_ID},
-            properties={
+            create_page,
+            JOURNAL_DB_ID,
+            {
                 "Title": {"title": [{"text": {"content": title}}]},
                 "Date":  {"date": {"start": today_str}}
             },
-            children=[{
+            [{
                 "object": "block",
                 "type": "paragraph",
                 "paragraph": {
@@ -205,9 +204,9 @@ async def save_journal_to_notion(entry_text: str):
 
         # 🔥 FIX: Threaded. Kept [:2000] here ONLY because Notion properties enforce it.
         await asyncio.to_thread(
-            notion.pages.create,
-            parent={"database_id": DAILY_LOG_DB_ID},
-            properties={
+            create_page,
+            DAILY_LOG_DB_ID,
+            {
                 "Title":    {"title": [{"text": {"content": f"Evening Journal — {today_str}"}}]},
                 "Category": {"select": {"name": "Journal"}},
                 "Content":  {"rich_text": [{"text": {"content": entry_text[:2000]}}]}

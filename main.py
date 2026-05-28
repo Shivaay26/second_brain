@@ -1,24 +1,26 @@
 import os
 import asyncio
-from datetime import time, timezone
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
-from google.genai import types
 
-from storage import TOKEN, save_to_queue
-from services.llm_service import ai_client
-from services.qdrant_service import qdrant_client, delete_vectors
-from config import FOLDERS, COLLECTION_NAME
+from services.storage import TOKEN, save_to_queue
+from services.llm_service import generate_content, get_embeddings_async
+from services.qdrant_service import delete_vectors, query_vectors
+from config import FOLDERS
 from summary_engine import compile_daily_summary, compile_weekly_summary, compile_monthly_summary
 from ai_engine import compile_batch
 
 from datetime import datetime, timedelta, timezone
-from services.notion_service import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID, notion
+from services.notion_service import (
+    TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID,
+    WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID,
+    query_database, update_page, get_page_blocks
+)
 
 # 🔥 FIX 1: Import the whole module to preserve state and prevent NameErrors
 import brief
 
 from config import (
-    gemini_model, embedding_model, MY_CHAT_ID, MAX_HISTORY,
+    MY_CHAT_ID, MAX_HISTORY,
     COMPILER_JOB_INTERVAL, COMPILER_JOB_FIRST, JOURNAL_PROMPT_TIME,
     MONTHLY_SUMMARY_TIME, WEEKLY_SUMMARY_TIME, DAILY_SUMMARY_TIME,
     MORNING_BRIEF_TIME
@@ -42,7 +44,7 @@ async def reflect_command(update, context):
         summaries = []
         
         def read_page_body(page_id: str) -> str:
-            blocks = notion.blocks.children.list(block_id=page_id)
+            blocks = get_page_blocks(page_id)
             return " ".join(
                 b["paragraph"]["rich_text"][0]["text"]["content"]
                 for b in blocks.get("results", [])
@@ -53,9 +55,10 @@ async def reflect_command(update, context):
         
         # Layer 1: Last 7 Days
         daily_raw = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=DAILY_SUMMARY_DB_ID,
-            sorts=[{"property": "Date", "direction": "descending"}],
+            query_database,
+            DAILY_SUMMARY_DB_ID,
+            None,
+            [{"property": "Date", "direction": "descending"}],
             page_size=7
         )
         for page in daily_raw.get("results", []):
@@ -65,9 +68,10 @@ async def reflect_command(update, context):
 
         # Layer 2: Last 4 Weeks
         weekly_raw = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=WEEKLY_SUMMARY_DB_ID,
-            sorts=[{"property": "Date", "direction": "descending"}],
+            query_database,
+            WEEKLY_SUMMARY_DB_ID,
+            None,
+            [{"property": "Date", "direction": "descending"}],
             page_size=4
         )
         for page in weekly_raw.get("results", []):
@@ -77,9 +81,10 @@ async def reflect_command(update, context):
 
         # Layer 3: Last 12 Months
         monthly_raw = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=MONTHLY_SUMMARY_DB_ID,
-            sorts=[{"property": "Date", "direction": "descending"}],
+            query_database,
+            MONTHLY_SUMMARY_DB_ID,
+            None,
+            [{"property": "Date", "direction": "descending"}],
             page_size=12
         )
         for page in monthly_raw.get("results", []):
@@ -119,12 +124,7 @@ CRITICAL REFLECTION QUESTION / TARGET GOAL:
 {query or 'Analyze my recent trajectory and give me an unfiltered audit of my current direction.'}
 """
         
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=system_instruction),
-        )
+        response = await generate_content(prompt, prompt=system_instruction)
         answer = response.text
 
         conversation_history.append({"question": query or "general reflection", "answer": answer})
@@ -148,9 +148,9 @@ async def done_command(update, context):
     try:
         # 🔥 FIX 2: Threaded Notion request
         results = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=TASKS_DB_ID,
-            filter={
+            query_database,
+            TASKS_DB_ID,
+            {
                 "or": [
                     {"property": "Status_Update", "status": {"equals": "Not started"}},
                     {"property": "Status_Update", "status": {"equals": "In progress"}},
@@ -175,10 +175,8 @@ async def done_command(update, context):
         task_names = "\n".join(f"{i+1}. {t['name']}" for i, t in enumerate(task_list))
         
         # 🔥 FIX 2: Threaded Gemini request
-        match_response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=f'Given this query: "{task_query}"\nAnd this task list:\n{task_names}\n\nReply with ONLY the number of the best matching task. If nothing matches reasonably, reply with 0.'
+        match_response = await generate_content(
+            f'Given this query: "{task_query}"\nAnd this task list:\n{task_names}\n\nReply with ONLY the number of the best matching task. If nothing matches reasonably, reply with 0.'
         )
 
         match_index = int(match_response.text.strip()) - 1
@@ -191,9 +189,9 @@ async def done_command(update, context):
 
         # 🔥 FIX 2: Threaded Notion Update
         await asyncio.to_thread(
-            notion.pages.update,
-            page_id=matched["id"],
-            properties={"Status_Update": {"status": {"name": "Done"}}}
+            update_page,
+            matched["id"],
+            {"Status_Update": {"status": {"name": "Done"}}}
         )
 
         await update.message.reply_text(f"✅ Marked as Done: {matched['name']}")
@@ -211,18 +209,12 @@ async def ask_command(update, context):
     await update.message.reply_text("🧠 Searching memories...")
     try:
         # 🔥 FIX 2: Re-added thread wrappers from our earlier sessions
-        embedding_response = await asyncio.to_thread(
-            ai_client.models.embed_content,
-            model=embedding_model,
-            contents=question,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY", output_dimensionality=768)
-        )
+        embedding_response = await get_embeddings_async(question, task_type="RETRIEVAL_QUERY")
         
         search_response = await asyncio.to_thread(
-            qdrant_client.query_points,
-            collection_name=COLLECTION_NAME,
-            query=embedding_response.embeddings[0].values,
-            limit=100
+            query_vectors,
+            embedding_response.embeddings[0].values,
+            100
         )
         
         retrieved_contexts = []
@@ -238,9 +230,9 @@ async def ask_command(update, context):
         now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
         
         tasks_raw = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=TASKS_DB_ID,
-            filter={"or": [{"property": "Status_Update", "status": {"equals": "Not started"}}, {"property": "Status_Update", "status": {"equals": "In progress"}}]}
+            query_database,
+            TASKS_DB_ID,
+            {"or": [{"property": "Status_Update", "status": {"equals": "Not started"}}, {"property": "Status_Update", "status": {"equals": "In progress"}}]}
         )
         
         tasks_lines = []
@@ -255,9 +247,9 @@ async def ask_command(update, context):
         tomorrow_str = (now_ist + timedelta(days=1)).strftime("%Y-%m-%d")
         
         logs_raw = await asyncio.to_thread(
-            notion.databases.query,
-            database_id=DAILY_LOG_DB_ID,
-            filter={"and": [{"timestamp": "created_time", "created_time": {"on_or_after": today_str}}, {"timestamp": "created_time", "created_time": {"before": tomorrow_str}}]}
+            query_database,
+            DAILY_LOG_DB_ID,
+            {"and": [{"timestamp": "created_time", "created_time": {"on_or_after": today_str}}, {"timestamp": "created_time", "created_time": {"before": tomorrow_str}}]}
         )
         
         logs_lines = []
@@ -286,12 +278,7 @@ Never say "based on the context provided" — just answer naturally.
 """
         prompt = f"{history_str}\nSemantic Memories:\n{chr(10).join(retrieved_contexts) or 'None'}\n\n{notion_context}\n\nQuestion: {question}\n"
         
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=system_instruction),
-        )
+        response = await generate_content(prompt, prompt=system_instruction)
         answer = response.text
 
         conversation_history.append({"question": question, "answer": answer})

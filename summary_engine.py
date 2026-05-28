@@ -1,12 +1,8 @@
-import os
-import asyncio
 import calendar
 from datetime import datetime, timedelta, timezone
-from dotenv import load_dotenv
-from config import gemini_model
 from services.notion_service import (
-    notion, TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID,
-    WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID
+    create_page, query_database, TASKS_DB_ID, DAILY_LOG_DB_ID,
+    DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID
 )
 from services.llm_service import generate_text
 
@@ -82,13 +78,13 @@ def write_summary_to_notion(db_id: str, title: str, date_str: str, summary_text:
                 "paragraph": {"rich_text": [{"type": "text", "text": {"content": "\n".join(current_paragraph)}}]}
             })
 
-        notion.pages.create(
-            parent={"database_id": db_id},
-            properties={
+        create_page(
+            db_id,
+            {
                 "Title": {"title": [{"text": {"content": title}}]},
                 "Date":  {"date": {"start": date_str}}
             },
-            children=child_blocks[:100]
+            child_blocks[:100]
         )
         print(f"✅ Summary written to Notion: {title}")
     except Exception as e:
@@ -100,9 +96,9 @@ def write_summary_to_notion(db_id: str, title: str, date_str: str, summary_text:
 def fetch_tasks_for_day(target_date: datetime):
     day_start = target_date.strftime("%Y-%m-%d")
     day_end = (target_date + timedelta(days=1)).strftime("%Y-%m-%d")
-    results = notion.databases.query(
-        database_id=TASKS_DB_ID,
-        filter={"and": [
+    results = query_database(
+        TASKS_DB_ID,
+        {"and": [
             {"property": "Due_Date", "date": {"on_or_after": day_start}},
             {"property": "Due_Date", "date": {"before": day_end}},
         ]}
@@ -121,9 +117,9 @@ def fetch_tasks_for_day(target_date: datetime):
 def fetch_logs_for_day(target_date: datetime):
     day_start = target_date.strftime("%Y-%m-%d")
     day_end = (target_date + timedelta(days=1)).strftime("%Y-%m-%d")
-    results = notion.databases.query(
-        database_id=DAILY_LOG_DB_ID,
-        filter={"and": [
+    results = query_database(
+        DAILY_LOG_DB_ID,
+        {"and": [
             {"timestamp": "created_time", "created_time": {"on_or_after": day_start}},
             {"timestamp": "created_time", "created_time": {"before": day_end}},
         ]}
@@ -181,13 +177,13 @@ async def compile_weekly_summary(context=None, week_start: datetime = None):
 
     print(f"📅 Compiling weekly summary for {week_label}...")
 
-    results = notion.databases.query(
-        database_id=DAILY_SUMMARY_DB_ID,
-        filter={"and": [
+    results = query_database(
+        DAILY_SUMMARY_DB_ID,
+        {"and": [
             {"property": "Date", "date": {"on_or_after": week_start_str}},
             {"property": "Date", "date": {"before": week_end_str}},
         ]},
-        sorts=[{"property": "Date", "direction": "ascending"}]
+        [{"property": "Date", "direction": "ascending"}]
     )
     
     daily_summaries = []
@@ -237,13 +233,13 @@ async def compile_monthly_summary(context=None, year: int = None, month: int = N
 
     print(f"📅 Compiling monthly summary for {month_label}...")
 
-    results = notion.databases.query(
-        database_id=WEEKLY_SUMMARY_DB_ID,
-        filter={"and": [
+    results = query_database(
+        WEEKLY_SUMMARY_DB_ID,
+        {"and": [
             {"property": "Date", "date": {"on_or_after": month_start_str}},
             {"property": "Date", "date": {"before": month_end_str}},
         ]},
-        sorts=[{"property": "Date", "direction": "ascending"}]
+        [{"property": "Date", "direction": "ascending"}]
     )
 
     weekly_summaries = []

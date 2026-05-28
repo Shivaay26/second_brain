@@ -68,3 +68,11 @@ def search_vectors(query_vector: list, limit: int = 5):
         query_vector=query_vector,
         limit=limit
     )
+
+def query_vectors(query_vector: list, limit: int = 100):
+    """Queries Qdrant for nearest memories using the current client API."""
+    return qdrant_client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        limit=limit
+    )

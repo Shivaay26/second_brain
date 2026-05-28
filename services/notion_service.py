@@ -25,13 +25,14 @@ def create_page(db_id: str, properties: dict, children: list = None):
         kwargs["children"] = children
     return notion.pages.create(**kwargs)
 
-def query_database(db_id: str, filter_dict: dict = None, sorts: list = None):
+def query_database(db_id: str, filter_dict: dict = None, sorts: list = None, **extra_kwargs):
     """Queries a Notion database with optional filters and sorts."""
     kwargs = {"database_id": db_id}
     if filter_dict:
         kwargs["filter"] = filter_dict
     if sorts:
         kwargs["sorts"] = sorts
+    kwargs.update(extra_kwargs)
     return notion.databases.query(**kwargs)
 
 def update_page(page_id: str, properties: dict):

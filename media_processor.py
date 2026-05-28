@@ -7,10 +7,9 @@ from typing import List
 from PIL import Image
 from google.genai import types
 import re
-from datetime import timedelta
 
-from storage import FOLDERS
-from config import gemini_model, FOLDERS
+from config import FOLDERS
+from services.llm_service import generate_content, upload_file, get_file, delete_file
 
 def check_capacity_error(e: Exception, context: str):
     error_msg = str(e)
@@ -36,11 +35,8 @@ async def batch_analyze_local_images(image_paths: List[str]) -> List[str]:
         """
         
         request_contents = loaded_images + [vision_prompt]
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
+        response = await generate_content(
             contents=request_contents,
-            # Native SDK configuration forces raw JSON and prevents markdown fence bugs
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
             )
@@ -70,14 +66,11 @@ async def process_audio_file_via_gemini(file_path: str) -> str:
     print(f"🎙️ Shipping to Gemini: {os.path.basename(file_path)}")
     uploaded_file = None
     try:
-        uploaded_file = await asyncio.to_thread(
-            ai_client.files.upload,
-            file=file_path
-        )
+        uploaded_file = await upload_file(file_path)
         
         print("⏳ Waiting for Google servers to index the audio...")
         while True:
-            info = await asyncio.to_thread(ai_client.files.get, name=uploaded_file.name)
+            info = await get_file(uploaded_file.name)
             state = str(getattr(info, "state", ""))
             
             if "ACTIVE" in state or state == "2":
@@ -94,9 +87,7 @@ async def process_audio_file_via_gemini(file_path: str) -> str:
         or environmental context, note it gracefully in brackets.
         """
         
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
+        response = await generate_content(
             contents=[uploaded_file, audio_prompt]
         )
         
@@ -111,7 +102,7 @@ async def process_audio_file_via_gemini(file_path: str) -> str:
         # Cloud clean-up happens no matter what
         if uploaded_file:
             try:
-                await asyncio.to_thread(ai_client.files.delete, name=uploaded_file.name)
+                await delete_file(uploaded_file.name)
             except Exception:
                 pass
 
@@ -156,9 +147,7 @@ async def process_external_video(url: str) -> dict:
             ]
         )
 
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
+        response = await generate_content(
             contents=request_content
         )
 
@@ -221,7 +210,7 @@ async def batch_process_short_media(urls: List[str]) -> List[dict]:
     try:
         print(f"🎙️ Uploading {len(valid_downloads)} audio tracks to Gemini...")
         for i, (title, path, url) in enumerate(valid_downloads):
-            uploaded_file = await asyncio.to_thread(ai_client.files.upload, file=path)
+            uploaded_file = await upload_file(path)
             uploaded_files.append((uploaded_file, title, url, path))
             
             request_contents.append(f"Audio Track {i+1} (Title: {title}):")
@@ -230,7 +219,7 @@ async def batch_process_short_media(urls: List[str]) -> List[dict]:
         print("⏳ Waiting for Google servers to index all tracks...")
         for uploaded, _, _, _ in uploaded_files:
             while True:
-                info = await asyncio.to_thread(ai_client.files.get, name=uploaded.name)
+                info = await get_file(uploaded.name)
                 state = str(getattr(info, "state", ""))
                 if "ACTIVE" in state or state == "2":
                     break
@@ -248,9 +237,7 @@ async def batch_process_short_media(urls: List[str]) -> List[dict]:
         """
         request_contents.append(batch_prompt)
         
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
+        response = await generate_content(
             contents=request_contents,
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
@@ -280,7 +267,7 @@ async def batch_process_short_media(urls: List[str]) -> List[dict]:
             try:
                 if os.path.exists(local_path):
                     os.remove(local_path)
-                await asyncio.to_thread(ai_client.files.delete, name=uploaded.name)
+                await delete_file(uploaded.name)
             except Exception:
                 pass
         print("🧹 Cleaned up all temporary local and cloud batch files.")
