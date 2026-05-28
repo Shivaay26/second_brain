@@ -394,6 +394,8 @@ async def setup_menu_commands(application: Application):
 def main():
     if not TOKEN:
         raise ValueError("Critical Error: 'bot_token' missing from .env")
+    if not MY_CHAT_ID:
+        raise ValueError("Critical Error: 'my_chat_id' missing from .env")
         
     # Set up the Application
     app = Application.builder().token(TOKEN).post_init(setup_menu_commands).build()

@@ -1,240 +1,184 @@
-# 🧠 Second Brain Bot
+# Second Brain Bot
 
-A Telegram-based AI assistant powered by Google's Gemini SDK, acting as your personal **"Second Brain."** It ingests messages, files, and YouTube audio, processes them through Gemini, and stores context in a local Qdrant vector database for long-term memory and retrieval.
+A Telegram-based personal knowledge assistant that captures messages, images, voice notes, audio, and useful links, then routes them into Notion and a local Qdrant vector store. It uses Google's Gemini API for transcription, image analysis, triage, summaries, reflection, and retrieval-augmented answers.
 
----
+## What It Does
 
-# 🏗️ Architecture & Data Flow
+- Queues incoming Telegram messages and media in SQLite.
+- Processes text, images, audio, YouTube links, and short-form media links.
+- Uses Gemini to analyze content and decide whether it should become a task, log, or long-term memory.
+- Saves tasks and logs to Notion.
+- Saves semantic memories to local Qdrant.
+- Supports `/ask` for memory search and live Notion context.
+- Supports `/reflect` for long-range reflection across daily, weekly, and monthly summaries.
+- Sends scheduled morning briefs and evening journal prompts.
+- Generates daily, weekly, and monthly summaries.
 
-1. **Input Layer (Telegram)**  
-   The user interacts with the bot via Telegram using `python-telegram-bot`. Inputs can include:
-   - Text messages
-   - Screenshots
-   - YouTube or Instagrams URLs
+## Project Structure
 
-2. **Processing & Extraction**  
-   If a YouTube/Insta link is detected, `yt-dlp` (backed by `ffmpeg`) extracts the best available audio stream directly to local storage.
-
-3. **Memory & Context (Qdrant)**  
-   User inputs and processed data are embedded and stored locally using `Qdrant` in file-mode.  
-   This enables:
-   - Semantic search
-   - Long-term memory
-   - Retrieval-Augmented Generation (RAG)
-
-4. **AI Processing (Gemini)**  
-   Retrieved context, system prompts, and local audio files are sent to Google's Gemini model via the official `google-genai` SDK.
-
-5. **Output Layer**  
-   Gemini's response is formatted and sent back to the user through Telegram. Temporary files (such as downloaded audio tracks) are automatically cleaned up afterward.
-
----
-
-# 🛠️ Tech Stack
-
-- **Language:** Python 3.10+
-- **Bot Framework:** `python-telegram-bot`
-- **AI Model:** Google Gemini (`google-genai`)
-- **Vector Database:** Qdrant (`qdrant-client` local mode)
-- **Media Processing:** `yt-dlp` + `ffmpeg`
-
----
-
-# 🚀 Local Setup & Installation
-
-## Prerequisites
-
-You will need:
-
-- **Python 3.10+**
-- **FFmpeg**
-
-### Install Dependencies
-
-#### Ubuntu / Debian
-```bash
-sudo apt install python3 python3-venv ffmpeg
+```text
+.
+├── main.py                  # Telegram bot entrypoint, command handlers, scheduler
+├── ai_engine.py             # Queue compiler and triage pipeline
+├── media_processor.py       # Image, audio, YouTube, and short-form media processing
+├── brief.py                 # Morning brief and journal flow
+├── summary_engine.py        # Daily, weekly, and monthly summary generation
+├── config.py                # Models, paths, batch sizes, schedule times
+├── services/
+│   ├── storage.py           # SQLite queue and local data folders
+│   ├── llm_service.py       # Gemini text, structured output, embeddings, file APIs
+│   ├── notion_service.py    # Notion database/page helpers
+│   └── qdrant_service.py    # Qdrant local vector storage
+└── second_brain_data/       # Runtime data, created automatically
 ```
 
-#### Mac
-```bash
-brew install ffmpeg
+## Runtime Data
+
+The app stores local runtime data in:
+
+```text
+second_brain_data/
+├── queue.db
+├── qdrant_db/
+├── images/
+├── videos/
+├── audio/
+└── documents/
 ```
 
-#### Windows
-Download FFmpeg and add it to your system `PATH`.
+Keep this directory persistent if you deploy the bot. It contains the queue, local vector database, and temporary media folders.
 
----
+## Requirements
 
-## 1. Clone the Repository
+- Python 3.10+
+- FFmpeg
+- Telegram bot token
+- Google Gemini API key
+- Notion integration token
+- Notion database IDs for tasks, logs, summaries, and journal entries
+
+## Local Setup
+
+Clone the repository:
 
 ```bash
 git clone https://github.com/Shivaay26/second_brain.git
 cd second_brain
 ```
 
----
-
-## 2. Set Up the Virtual Environment
+Create and activate a virtual environment:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-### On Windows
+On Windows:
+
 ```bash
-venv\Scripts\activate
+.venv\Scripts\activate
 ```
 
----
-
-## 3. Install Dependencies
+Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-> **Note:**  
-> If you are on an ARM64 machine (such as Oracle Cloud OCI ARM instances), ensure `numpy` is listed **without a strict version pin** in `requirements.txt` to avoid architecture compatibility issues.
+Install FFmpeg:
 
----
+```bash
+sudo apt update
+sudo apt install ffmpeg
+```
 
-## 4. Environment Variables
+On macOS:
+
+```bash
+brew install ffmpeg
+```
+
+## Environment Variables
 
 Create a `.env` file in the project root:
 
 ```env
-bot_token="Your telegram bot token"
+bot_token="YOUR_TELEGRAM_BOT_TOKEN"
+my_chat_id="YOUR_TELEGRAM_CHAT_ID"
 
-gemini_api_key="Your gemini api key"
+gemini_api_key="YOUR_GEMINI_API_KEY"
+notion_token="YOUR_NOTION_INTEGRATION_TOKEN"
 
-notion_token="Notion integration token"
-
-tasks_db_id="Notion tasks db id"
-
-daily_log_db_id="Notion daily log db id"
-
-content_vault_db_id="Notion content vault db id"
+tasks_db_id="YOUR_NOTION_TASKS_DATABASE_ID"
+daily_log_db_id="YOUR_NOTION_DAILY_LOG_DATABASE_ID"
+daily_summary_db_id="YOUR_NOTION_DAILY_SUMMARY_DATABASE_ID"
+weekly_summary_db_id="YOUR_NOTION_WEEKLY_SUMMARY_DATABASE_ID"
+monthly_summary_db_id="YOUR_NOTION_MONTHLY_SUMMARY_DATABASE_ID"
+journal_db_id="YOUR_NOTION_JOURNAL_DATABASE_ID"
 ```
 
----
+`my_chat_id` should be your Telegram chat ID as a number. The bot uses it for scheduled messages such as morning briefs and journal prompts.
 
-## 5. Run the Bot
+## Run Locally
 
 ```bash
 python main.py
 ```
 
----
+The bot starts Telegram polling and registers scheduled background jobs for:
 
-# ☁️ Production Deployment (Linux / systemd)
+- Queue compilation
+- Journal prompt
+- Morning brief
+- Daily summary
+- Weekly summary
+- Monthly summary
 
-To keep the bot running 24/7 on a cloud server (such as Oracle Cloud OCI) and survive reboots, deploy it as a `systemd` service.
+## Telegram Commands
 
----
+- `/ask <question>`: search memories and live Notion state.
+- `/reflect <question or goal>`: analyze recent summaries and longer-term patterns.
+- `/done <task name>`: mark a matching Notion task as done.
+- `/delete <memory indexes>`: delete memories returned by `/ask`.
+- `/clear`: clear the in-memory conversation context.
 
-## Create the Service File
+## Deployment Notes
 
-```bash
-sudo nano /etc/systemd/system/second-brain.service
-```
+Qdrant runs in local file mode, so only one bot process should access `second_brain_data/qdrant_db` at a time. Do not run a local debug process while the production bot is already running against the same data directory.
 
----
+For server deployment, keep these persistent:
 
-## Paste the Following Configuration
+- `.env`
+- `second_brain_data/`
 
-```ini
-[Unit]
-Description=Second Brain Gemini Application
-After=network.target
+Do not commit them to git.
 
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/app
-EnvironmentFile=/home/ubuntu/app/.env
-ExecStart=/home/ubuntu/app/venv/bin/python main.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
+## Docker Notes
 
-[Install]
-WantedBy=multi-user.target
-```
+This project can be containerized. A Docker setup should:
 
----
+- Use a Python slim image.
+- Install FFmpeg inside the image.
+- Install `requirements.txt`.
+- Copy the app code.
+- Load secrets from `.env` at runtime.
+- Mount `second_brain_data/` as a volume so Qdrant and SQLite data survive container rebuilds.
 
-## Enable and Start the Service
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable second-brain.service
-sudo systemctl start second-brain.service
-```
-
----
-
-# 🖥️ Server Management Commands
-
-## View Live Logs
+Example runtime shape:
 
 ```bash
-sudo journalctl -u second-brain.service -f
+docker run --env-file .env \
+  -v "$(pwd)/second_brain_data:/app/second_brain_data" \
+  second-brain-bot
 ```
 
-## Restart Bot (After `git pull`)
+## Important Caveats
 
-```bash
-sudo systemctl restart second-brain.service
-```
+- Local Qdrant uses file locks. Run only one container or process against the same `second_brain_data` directory.
+- Media downloads depend on `yt-dlp` and FFmpeg.
+- Notion rich text properties have size limits, so very large generated text may need chunking or truncation.
+- The app currently uses long-running Telegram polling, not webhooks.
 
-## Stop Bot
+## License
 
-```bash
-sudo systemctl stop second-brain.service
-```
-
----
-
-# ⚠️ Important Notes
-
-## Database Locking
-
-Qdrant runs in **local file mode**, which places a strict lock on the database directory.
-
-This means you **cannot** run:
-
-```bash
-python main.py
-```
-
-manually while the `systemd` background service is active, or you will encounter:
-
-```text
-Resource temporarily unavailable
-```
-
-If you need to run debugging scripts manually, stop the background service first:
-
-```bash
-sudo systemctl stop second_brain.service
-```
-
----
-
-# 📌 Features
-
-- Telegram-based AI assistant
-- Long-term vector memory using Qdrant
-- Retrieval-Augmented Generation (RAG)
-- YouTube audio ingestion
-- Gemini-powered contextual responses
-- Automatic temporary file cleanup
-- Local-first architecture
-- Production-ready deployment via `systemd`
-
----
-
-# 📄 License
-
-This project is open-source and available under the MIT License.
+MIT License.

@@ -1,13 +1,16 @@
 # config.py
 import os
 from datetime import time, timezone
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- AI Models ---
 gemini_model = 'gemini-3.1-flash-lite'
 embedding_model = "gemini-embedding-2"
 
 # --- System Variables ---
-MY_CHAT_ID = 6455532575
+MY_CHAT_ID = int(os.getenv("my_chat_id", "0"))
 MAX_HISTORY = 15
 
 # --- Batch Sizes ---
