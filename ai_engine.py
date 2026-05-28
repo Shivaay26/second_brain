@@ -4,10 +4,10 @@ import os
 from typing import List, Optional
 from pydantic import BaseModel
 from google.genai import types
-from storage import (
-    ai_client, fetch_pending_queue, update_queue_status,
-    insert_task, insert_daily_log, insert_vector_batch
-)
+from storage import fetch_pending_queue, update_queue_status
+from services.notion_service import insert_task, insert_daily_log
+from services.qdrant_service import insert_vector_batch
+from services.llm_service import generate_structured_data
 from media_processor import process_audio_file_via_gemini, process_external_video, batch_analyze_local_images, batch_process_short_media
 
 from config import (
@@ -51,15 +51,21 @@ async def compile_batch():
     image_rows = [r for r in all_rows if r['type'] == 'image'][:image_batch_size]
     if image_rows:
         image_paths = [row['content'] for row in image_rows]
-        descriptions = await batch_analyze_local_images(image_paths)
-        
-        for i, row in enumerate(image_rows):
-            processed_rows.append({
-                "id": row["id"], "type": "text",
-                "content": f"[Visual Content Analysis]:\n{descriptions[i]}", 
-                "timestamp": row["timestamp"]
-            })
-            if os.path.exists(row['content']): os.remove(row['content'])
+        try:
+            descriptions = await batch_analyze_local_images(image_paths)
+            for i, row in enumerate(image_rows):
+                processed_rows.append({
+                    "id": row["id"], "type": "text",
+                    "content": f"[Visual Content Analysis]:\n{descriptions[i]}", 
+                    "timestamp": row["timestamp"]
+                })
+        finally:
+            for path in image_paths:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except:
+                        pass
 
     # 3. SHORT-FORM MEDIA BATCHING (Insta, TikTok, Twitter)
     short_media_rows = [r for r in all_rows if r['type'] == 'url' and any(d in r['content'] for d in short_domains)][:short_media_batch_size]
@@ -80,13 +86,19 @@ async def compile_batch():
     heavy_media_rows = [r for r in all_rows if r['type'] == 'audio' or (r['type'] == 'url' and any(d in r['content'] for d in yt_domains))][:video_audio_batch_size]
     for row in heavy_media_rows:
         if row['type'] == 'audio':
-            analysis_text = await process_audio_file_via_gemini(row['content'])
-            processed_rows.append({
-                "id": row["id"], "type": "text",
-                "content": f"[Voice Note Evaluation]: {analysis_text}", "timestamp": row["timestamp"]
-            })
-            if os.path.exists(row['content']): os.remove(row['content'])
-            await asyncio.sleep(2) 
+            try:
+                analysis_text = await process_audio_file_via_gemini(row['content'])
+                processed_rows.append({
+                    "id": row["id"], "type": "text",
+                    "content": f"[Voice Note Evaluation]: {analysis_text}", "timestamp": row["timestamp"]
+                })
+                await asyncio.sleep(2) 
+            finally:
+                if os.path.exists(row['content']):
+                    try:
+                        os.remove(row['content'])
+                    except:
+                        pass
             
         elif row['type'] == 'url':
             video_data = await process_external_video(row['content'])
@@ -122,18 +134,8 @@ async def compile_batch():
     print(f"📦 Shipping batch of {len(processed_rows)} elements to Gemini...")
     
     try:
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=f"Deconstruct this batch:\n\n{batch_content}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=TriageBlueprint,
-            )
-        )
-        
-        blueprint = json.loads(response.text)
+        response_text = await generate_structured_data(system_prompt, f"Deconstruct this batch:\n\n{batch_content}", TriageBlueprint)
+        blueprint = json.loads(response_text)
         vector_batch_payload = []
 
         for task in blueprint.get("notion_tasks", []):

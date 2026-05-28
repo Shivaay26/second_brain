@@ -3,21 +3,12 @@ import asyncio
 import calendar
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from notion_client import Client
-from google import genai
 from config import gemini_model
-
-load_dotenv()
-NOTION_TOKEN = os.getenv("notion_token")
-GEMINI_API_KEY = os.getenv("gemini_api_key")
-TASKS_DB_ID = os.getenv("tasks_db_id")
-DAILY_LOG_DB_ID = os.getenv("daily_log_db_id")
-DAILY_SUMMARY_DB_ID = os.getenv("daily_summary_db_id")
-WEEKLY_SUMMARY_DB_ID = os.getenv("weekly_summary_db_id")
-MONTHLY_SUMMARY_DB_ID = os.getenv("monthly_summary_db_id")
-
-notion = Client(auth=NOTION_TOKEN)
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
+from services.notion_service import (
+    notion, TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID,
+    WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID
+)
+from services.llm_service import generate_text
 
 # ── PROMPTS ──
 DAILY_PROMPT = """You are a personal intelligence compression engine for a Second Brain system.
@@ -103,15 +94,7 @@ def write_summary_to_notion(db_id: str, title: str, date_str: str, summary_text:
     except Exception as e:
         print(f"⚠️ Failed to write summary to Notion: {e}")
 
-# ── GENERIC LLM CALLER ──
-async def generate_summary(prompt: str, raw_data: str) -> str:
-    response = await asyncio.to_thread(
-        ai_client.models.generate_content,
-        model=gemini_model,
-        contents=raw_data,
-        config={"system_instruction": prompt}
-    )
-    return response.text.strip()
+# Removed generic generate_summary since we use llm_service.generate_text
 
 # ── 1. DAILY ENGINE ──
 def fetch_tasks_for_day(target_date: datetime):
@@ -180,7 +163,7 @@ async def compile_daily_summary(context=None, target_date: datetime = None):
 
     raw_data = f"Compress this day:\n\nDATE: {date_str}\n\n=== TASKS ===\nCompleted ({len(completed)}):\n{task_comp_str}\n\nPending ({len(pending)}):\n{task_pend_str}\n\n=== DAILY LOGS ({len(logs)}) ===\n{logs_str}"
 
-    summary = await generate_summary(DAILY_PROMPT, raw_data)
+    summary = await generate_text(DAILY_PROMPT, raw_data)
     write_summary_to_notion(DAILY_SUMMARY_DB_ID, f"Daily Summary — {date_str}", date_str, summary)
 
 # ── 2. WEEKLY ENGINE ──
@@ -231,7 +214,7 @@ async def compile_weekly_summary(context=None, week_start: datetime = None):
     for s in daily_summaries:
         raw_data += f"=== {s['date']} ===\n{s['content']}\n\n"
 
-    summary = await generate_summary(WEEKLY_PROMPT, raw_data)
+    summary = await generate_text(WEEKLY_PROMPT, raw_data)
     write_summary_to_notion(WEEKLY_SUMMARY_DB_ID, f"Weekly Summary — {week_label}", week_start_str, summary)
 
 # ── 3. MONTHLY ENGINE ──
@@ -281,5 +264,5 @@ async def compile_monthly_summary(context=None, year: int = None, month: int = N
     for s in weekly_summaries:
         raw_data += f"=== {s['title']} ===\n{s['content']}\n\n"
 
-    summary = await generate_summary(MONTHLY_PROMPT, raw_data)
+    summary = await generate_text(MONTHLY_PROMPT, raw_data)
     write_summary_to_notion(MONTHLY_SUMMARY_DB_ID, f"Monthly Summary — {month_label}", month_start_str, summary)

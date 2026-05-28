@@ -4,14 +4,15 @@ from datetime import time, timezone
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from google.genai import types
 
-# Import from our modular system
-from storage import TOKEN, ai_client, qdrant_client, save_to_queue, delete_vectors
+from storage import TOKEN, save_to_queue
+from services.llm_service import ai_client
+from services.qdrant_service import qdrant_client, delete_vectors
 from config import FOLDERS, COLLECTION_NAME
 from summary_engine import compile_daily_summary, compile_weekly_summary, compile_monthly_summary
 from ai_engine import compile_batch
 
 from datetime import datetime, timedelta, timezone
-from storage import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID, notion
+from services.notion_service import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID, notion
 
 # 🔥 FIX 1: Import the whole module to preserve state and prevent NameErrors
 import brief

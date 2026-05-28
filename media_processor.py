@@ -9,7 +9,7 @@ from google.genai import types
 import re
 from datetime import timedelta
 
-from storage import ai_client
+from storage import FOLDERS
 from config import gemini_model, FOLDERS
 
 def check_capacity_error(e: Exception, context: str):

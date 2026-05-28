@@ -2,22 +2,10 @@ import os
 import asyncio
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from notion_client import Client
-from google import genai
 from google.genai import types
-
-load_dotenv()
-
-NOTION_TOKEN     = os.getenv("notion_token")
-GEMINI_API_KEY   = os.getenv("gemini_api_key")
-TASKS_DB_ID      = os.getenv("tasks_db_id")
-DAILY_SUMMARY_DB_ID = os.getenv("daily_summary_db_id")
-JOURNAL_DB_ID    = os.getenv("journal_db_id")
-DAILY_LOG_DB_ID  = os.getenv("daily_log_db_id")
-
-notion    = Client(auth=NOTION_TOKEN)
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
 from config import gemini_model
+from services.notion_service import notion, TASKS_DB_ID, DAILY_SUMMARY_DB_ID, JOURNAL_DB_ID, DAILY_LOG_DB_ID
+from services.llm_service import generate_text
 
 # ── STATE FLAG ────────────────────────────────────────────────────────────────
 
@@ -135,14 +123,9 @@ Top 2-3 things to focus on, ranked by importance. Be specific, not generic.
 List any tasks due today. If none, say so plainly.
 """
 
-        response = await asyncio.to_thread(
-            ai_client.models.generate_content,
-            model=gemini_model,
-            contents=f"Generate morning brief:\n\n{raw_data}",
-            config={"system_instruction": system_prompt}
-        )
+        response_text = await generate_text(system_prompt, f"Generate morning brief:\n\n{raw_data}")
 
-        await bot.send_message(chat_id=chat_id, text=f"☀️ *Morning Brief*\n\n{response.text}")
+        await bot.send_message(chat_id=chat_id, text=f"☀️ *Morning Brief*\n\n{response_text}")
         print("✅ Morning brief sent.")
 
     except Exception as e:
@@ -193,13 +176,7 @@ Raw emotional state, as stated.
 What the user wants from tomorrow.
 """
 
-    response = await asyncio.to_thread(
-        ai_client.models.generate_content,
-        model=gemini_model,
-        contents=f"Structure this journal entry:\n\n{text}",
-        config={"system_instruction": system_prompt}
-    )
-    return response.text.strip()
+    return await generate_text(system_prompt, f"Structure this journal entry:\n\n{text}")
 
 
 async def save_journal_to_notion(entry_text: str):
