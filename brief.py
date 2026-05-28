@@ -17,7 +17,7 @@ DAILY_LOG_DB_ID  = os.getenv("daily_log_db_id")
 
 notion    = Client(auth=NOTION_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
-gemini_model = "gemini-3.1-flash-lite"
+from config import gemini_model
 
 # ── STATE FLAG ────────────────────────────────────────────────────────────────
 waiting_for_journal = False

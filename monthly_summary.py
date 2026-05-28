@@ -16,7 +16,7 @@ MONTHLY_SUMMARY_DB_ID = os.getenv("monthly_summary_db_id")
 notion = Client(auth=NOTION_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 # Optimized to use your standard production model
-gemini_model = "gemini-3.1-flash-lite"  
+from config import gemini_model
 
 
 # ── 1. FETCHER ───────────────────────────────────────────────────────────────

@@ -9,9 +9,8 @@ from google.genai import types
 import re
 from datetime import timedelta
 
-from storage import FOLDERS, ai_client, gemini_model
-
-gemini_model = 'gemini-3.1-flash-lite'  # Global model configuration
+from storage import ai_client
+from config import gemini_model, FOLDERS
 
 async def batch_analyze_local_images(image_paths: List[str]) -> List[str]:
     """Opens a batch of local images, passes them to Gemini Vision, and returns OCR/descriptions."""

@@ -10,15 +10,10 @@ from storage import (
 )
 from media_processor import process_audio_file_via_gemini, process_external_video, batch_analyze_local_images, batch_process_short_media
 
-image_batch_size = 500
-short_media_batch_size = 50
-video_audio_batch_size = 5
-gemini_model = 'gemini-3.1-flash-lite'  
-embedding_model = "gemini-embedding-2"  
-
-# Domain categories for smart routing
-yt_domains = ['youtube.com', 'youtu.be']
-short_domains = ['instagram.com', 'tiktok.com', 'twitter.com', 'x.com']
+from config import (
+    image_batch_size, short_media_batch_size, video_audio_batch_size, 
+    gemini_model, embedding_model, yt_domains, short_domains
+)
 
 class TaskSchema(BaseModel):
     task_name: str

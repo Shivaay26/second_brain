@@ -13,8 +13,7 @@ from typing import Optional, List, Dict
 # 1. Load Environment Variables
 load_dotenv()
 
-gemini_model = 'gemini-3.1-flash-lite'  # Define the Gemini model to use globally
-embedding_model = "gemini-embedding-2"  # Define the embedding model globally
+from config import gemini_model, embedding_model
 JOURNAL_DB_ID = os.getenv("journal_db_id")
 
 # Tokens
@@ -30,20 +29,10 @@ WEEKLY_SUMMARY_DB_ID = os.getenv("weekly_summary_db_id")
 MONTHLY_SUMMARY_DB_ID = os.getenv("monthly_summary_db_id")
 
 # 2. Setup Directory Structure
-BASE_DATA_DIR = "second_brain_data"
-FOLDERS = {
-    "image": os.path.join(BASE_DATA_DIR, "images"),
-    "video": os.path.join(BASE_DATA_DIR, "videos"),
-    "audio": os.path.join(BASE_DATA_DIR, "audio"),
-    "document": os.path.join(BASE_DATA_DIR, "documents")
-}
+from config import BASE_DATA_DIR, FOLDERS, DB_PATH, QDRANT_PATH, COLLECTION_NAME, VECTOR_SIZE
 
 for folder_path in FOLDERS.values():
     os.makedirs(folder_path, exist_ok=True)
-
-DB_PATH = os.path.join(BASE_DATA_DIR, "queue.db")
-QDRANT_PATH = os.path.join(BASE_DATA_DIR, "qdrant_db")
-COLLECTION_NAME = "second_brain_memories"
 
 # 3. Initialize Global Clients (Groq safely removed)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -54,7 +43,7 @@ qdrant_client = QdrantClient(path=QDRANT_PATH)
 if not qdrant_client.collection_exists(COLLECTION_NAME):
     qdrant_client.create_collection(
         collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+        vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
     )
 
 # 4. SQLite Queue Functions
@@ -157,7 +146,7 @@ def insert_vector_batch(memories: List[Dict]):
             model=embedding_model,
             contents=contents,
             config=types.EmbedContentConfig(
-                output_dimensionality=768 # Force 768 to match your existing local Qdrant db
+                output_dimensionality=VECTOR_SIZE # Force to match your existing local Qdrant db
                 # Note: task_type is deprecated in gemini-embedding-2, so it is removed.
             )
         )

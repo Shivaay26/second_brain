@@ -5,7 +5,8 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from google.genai import types
 
 # Import from our modular system
-from storage import TOKEN, FOLDERS, ai_client, qdrant_client, COLLECTION_NAME, save_to_queue, delete_vectors
+from storage import TOKEN, ai_client, qdrant_client, save_to_queue, delete_vectors
+from config import FOLDERS, COLLECTION_NAME
 from ai_engine import compile_batch
 
 from daily_summary import compile_daily_summary
@@ -18,14 +19,15 @@ from storage import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SU
 # 🔥 FIX 1: Import the whole module to preserve state and prevent NameErrors
 import brief
 
-gemini_model = 'gemini-3.1-flash-lite'
-embedding_model = "gemini-embedding-2"
-
-MY_CHAT_ID = 6455532575
+from config import (
+    gemini_model, embedding_model, MY_CHAT_ID, MAX_HISTORY,
+    COMPILER_JOB_INTERVAL, COMPILER_JOB_FIRST, JOURNAL_PROMPT_TIME,
+    MONTHLY_SUMMARY_TIME, WEEKLY_SUMMARY_TIME, DAILY_SUMMARY_TIME,
+    MORNING_BRIEF_TIME
+)
 
 conversation_history = []
 tracked_memories = []
-MAX_HISTORY = 15
 
 async def run_morning_brief(context: ContextTypes.DEFAULT_TYPE):
     await brief.send_morning_brief(context.bot, chat_id=MY_CHAT_ID)
@@ -422,25 +424,25 @@ def main():
     # Jobs
     app.job_queue.run_repeating(
         run_compiler_job,
-        interval=600,
-        first=10,
+        interval=COMPILER_JOB_INTERVAL,
+        first=COMPILER_JOB_FIRST,
         job_kwargs={"misfire_grace_time": 300}
     )
 
     # 10:00 PM IST daily
-    app.job_queue.run_daily(callback=run_journal_prompt, time=time(16, 30, tzinfo=timezone.utc))
+    app.job_queue.run_daily(callback=run_journal_prompt, time=JOURNAL_PROMPT_TIME)
     
     # 11:50 PM IST daily
-    app.job_queue.run_daily(callback=compile_monthly_summary, time=time(18, 20, tzinfo=timezone.utc))
+    app.job_queue.run_daily(callback=compile_monthly_summary, time=MONTHLY_SUMMARY_TIME)
     
     # 11:55 PM IST on SUNDAYS (Changed from 6 to 0 for v20+)
-    app.job_queue.run_daily(callback=compile_weekly_summary, time=time(18, 25, tzinfo=timezone.utc), days=(0,))
+    app.job_queue.run_daily(callback=compile_weekly_summary, time=WEEKLY_SUMMARY_TIME, days=(0,))
     
     # Midnight IST daily
-    app.job_queue.run_daily(callback=compile_daily_summary, time=time(18, 30, tzinfo=timezone.utc))
+    app.job_queue.run_daily(callback=compile_daily_summary, time=DAILY_SUMMARY_TIME)
     
     # 8:00 AM IST daily
-    app.job_queue.run_daily(callback=run_morning_brief, time=time(2, 30, tzinfo=timezone.utc))
+    app.job_queue.run_daily(callback=run_morning_brief, time=MORNING_BRIEF_TIME)
 
     print("🚀 Master Node Online. Interactive Mode & Auto-Compiler Active.")
     app.run_polling()

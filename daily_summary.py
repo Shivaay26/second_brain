@@ -17,7 +17,7 @@ DAILY_SUMMARY_DB_ID = os.getenv("daily_summary_db_id")
 
 notion = Client(auth=NOTION_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
-gemini_model = "gemini-3.1-flash-lite"  # Standardized production model
+from config import gemini_model
 
 
 # ── 1. FETCHERS ──────────────────────────────────────────────────────────────
