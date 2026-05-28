@@ -7,11 +7,8 @@ from google.genai import types
 # Import from our modular system
 from storage import TOKEN, ai_client, qdrant_client, save_to_queue, delete_vectors
 from config import FOLDERS, COLLECTION_NAME
+from summary_engine import compile_daily_summary, compile_weekly_summary, compile_monthly_summary
 from ai_engine import compile_batch
-
-from daily_summary import compile_daily_summary
-from weekly_summary import compile_weekly_summary
-from monthly_summary import compile_monthly_summary
 
 from datetime import datetime, timedelta, timezone
 from storage import TASKS_DB_ID, DAILY_LOG_DB_ID, DAILY_SUMMARY_DB_ID, WEEKLY_SUMMARY_DB_ID, MONTHLY_SUMMARY_DB_ID, notion
