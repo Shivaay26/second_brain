@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from google.genai import types
 from storage import (
     ai_client, fetch_pending_queue, update_queue_status,
-    insert_task, insert_daily_log, insert_content_vault, insert_vector_batch
+    insert_task, insert_daily_log, insert_vector_batch
 )
 from media_processor import process_audio_file_via_gemini, process_external_video, batch_analyze_local_images, batch_process_short_media
 
@@ -30,11 +30,6 @@ class LogSchema(BaseModel):
     category: str
     content: str
 
-class VaultSchema(BaseModel):
-    title: str
-    url: str
-    summary: str
-
 class MemorySchema(BaseModel):
     category: str
     content: str
@@ -43,7 +38,6 @@ class MemorySchema(BaseModel):
 class TriageBlueprint(BaseModel):
     notion_tasks: List[TaskSchema] = []
     notion_logs: List[LogSchema] = []
-    notion_vault: List[VaultSchema] = []
     qdrant_memories: List[MemorySchema] = []
 
 async def compile_batch():
@@ -121,7 +115,6 @@ async def compile_batch():
     ROUTING RULES:
     - notion_tasks: ONLY explicit action items with a clear verb ("attend", "submit", "complete", "buy"). Images are NEVER tasks.
     - notion_logs: ONLY structured observations, reflections, or notes with meaningful depth. Raw image descriptions are NEVER logs.
-    - notion_vault: any educational resources with clear learning value. be it image description , video analysis, or insightful text captures. If it has value for future reference, it belongs in the vault.
     - qdrant_memories: Everything else — images, fleeting thoughts, quick links, random captures.
 
     
@@ -162,14 +155,6 @@ async def compile_batch():
                 "content": f"Log: {log['title']} | {log['content']}",
                 "category": log["category"],
                 "source_url": None
-            })
-
-        for asset in blueprint.get("notion_vault", []):
-            insert_content_vault(asset["title"], asset["url"], asset["summary"])
-            vector_batch_payload.append({
-                "content": f"Vault: {asset['title']} | {asset['summary']}",
-                "category": "Vault",
-                "source_url": asset["url"]
             })
 
         for memory in blueprint.get("qdrant_memories", []):

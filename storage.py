@@ -28,7 +28,6 @@ DAILY_LOG_DB_ID = os.getenv("daily_log_db_id")
 DAILY_SUMMARY_DB_ID  = os.getenv("daily_summary_db_id")
 WEEKLY_SUMMARY_DB_ID = os.getenv("weekly_summary_db_id")
 MONTHLY_SUMMARY_DB_ID = os.getenv("monthly_summary_db_id")
-CONTENT_VAULT_DB_ID = os.getenv("content_vault_db_id")
 
 # 2. Setup Directory Structure
 BASE_DATA_DIR = "second_brain_data"
@@ -137,17 +136,6 @@ def insert_daily_log(title, category, content):
         notion.pages.create(parent={"database_id": DAILY_LOG_DB_ID}, properties=properties)
     except Exception as e:
         print(f"⚠️ Failed to insert daily log '{title}' to Notion: {e}")
-
-def insert_content_vault(title, url, summary):
-    try:
-        properties = {
-            "Title": {"title": [{"text": {"content": title}}]},
-            "URL": {"url": url},
-            "Summary": {"rich_text": [{"text": {"content": summary}}]}
-        }
-        notion.pages.create(parent={"database_id": CONTENT_VAULT_DB_ID}, properties=properties)
-    except Exception as e:
-        print(f"⚠️ Failed to insert content vault item '{title}' to Notion: {e}")
 
 def insert_vector_batch(memories: List[Dict]):
     """
